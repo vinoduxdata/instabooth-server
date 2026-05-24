@@ -1,0 +1,137 @@
+"""
+AppConfig class providing central config
+file called appconfig_ to avoid conflicts with the singleton appconfig in __init__
+"""
+
+import json
+import logging
+import os
+import shutil
+from datetime import datetime
+from pathlib import Path
+from typing import Literal
+
+import jsonref
+from pydantic_settings import BaseSettings, JsonConfigSettingsSource, PydanticBaseSettingsSource, SettingsConfigDict
+
+SchemaTypes = Literal["default", "dereferenced"]
+logger = logging.getLogger(__name__)
+
+
+class BaseConfig(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file_encoding="utf-8",
+        # first in following list is least important; last .env file overwrites the other.
+        env_file=[".env.installer", ".env.dev", ".env.test", ".env.prod"],
+        env_nested_delimiter="__",
+        case_sensitive=True,
+        extra="ignore",
+        json_file_encoding="utf-8",
+    )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return (init_settings, JsonConfigSettingsSource(settings_cls), dotenv_settings, env_settings, file_secret_settings)
+
+    @classmethod
+    def _fix_single_allof(cls, dictionary):
+        """Remove allof that would interfere with the normal processing of jsonforms
+        Despite there is a bugfix in pydantic, it seems it applies only on first level, nested
+        BaseModels still have the allof with just 1 item.
+
+        References:
+        - https://github.com/pydantic/pydantic/issues/1209
+        - https://github.com/flexcompute/Flow360/pull/90/files#diff-1552b8f7a48149f4361b20a50d6c8a0f79856de26b0765626abc5d54093a7f99
+        Args:
+            dictionary (_type_): _description_
+
+        Raises:
+            ValueError: _description_
+
+        Returns:
+            _type_: _description_
+        """
+        if not isinstance(dictionary, dict):
+            raise ValueError("Input must be a dictionary")
+
+        for key, value in list(dictionary.items()):
+            if key == "allOf" and len(value) == 1 and isinstance(value[0], dict):
+                for allOfKey, allOfValue in list(value[0].items()):
+                    dictionary[allOfKey] = allOfValue
+                del dictionary["allOf"]
+            elif isinstance(value, dict):
+                cls._fix_single_allof(value)
+
+        return dictionary
+
+    def get_schema(self, schema_type: SchemaTypes = "default"):
+        """Get schema to build UI. Schema is polished to the needs of UI"""
+        schema = self.model_json_schema()
+        self._fix_single_allof(schema)
+
+        if schema_type == "dereferenced":
+            # https://github.com/pydantic/pydantic/issues/889#issuecomment-1064688675
+
+            return jsonref.loads(json.dumps(schema))
+
+        else:
+            return schema
+
+    def get_current(self, secrets_is_allowed: bool = False):
+        return self.model_dump(context={"secrets_is_allowed": secrets_is_allowed}, mode="json")
+
+    def reset_defaults(self):
+        # reload in-place https://docs.pydantic.dev/latest/concepts/pydantic_settings/#in-place-reloading
+        self.__init__()
+
+    def persist(self):
+        """Persist config to file"""
+
+        # if a config exists, backup before overwriting
+        self._backup_config()
+
+        # write model to disk to persist
+        with open(str(self.model_config.get("json_file")), mode="w", encoding=self.model_config.get("json_file_encoding")) as write_file:
+            write_file.write(self.model_dump_json(context={"secrets_is_allowed": True}, indent=2))
+
+        logger.debug(f"persisted config to {self.model_config.get('json_file')}")
+
+        # remove old config to not clutter the config dir
+        self._remove_old_configs()
+
+    def deleteconfig(self):
+        """Reset to defaults"""
+        logger.debug("config reset to default")
+        json_file = None
+
+        try:
+            json_file = str(self.model_config.get("json_file"))
+            os.remove(json_file)
+            logger.debug(f"deleted {json_file} file.")
+        except (FileNotFoundError, PermissionError):
+            logger.warning(f"delete {json_file} file failed.")
+
+    def _backup_config(self):
+        json_file = str(self.model_config.get("json_file"))
+        if Path(json_file).exists():
+            datetimestr = datetime.now().strftime("%Y%m%d-%H%M%S")
+            shutil.copy2(json_file, f"{json_file}_backup-{datetimestr}")
+
+    def _remove_old_configs(self):
+        KEEP_NO = 10
+        json_file = Path(str(self.model_config.get("json_file")))
+        json_file_name = json_file.name
+        json_file_folder = json_file.parent
+        paths = sorted(json_file_folder.glob(f"{json_file_name}_backup-*"), key=os.path.getmtime, reverse=True)
+
+        if len(paths) > KEEP_NO:
+            for path in paths[KEEP_NO:]:
+                logging.debug(f"deleting old config {path}")
+                os.remove(path)

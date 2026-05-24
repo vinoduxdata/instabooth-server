@@ -1,0 +1,72 @@
+import logging
+
+from statemachine import Event
+
+from ...database.models import MediaitemTypes
+from ..acquisition import AcquisitionService
+from ..config.groups.actions import SingleImageConfigurationSet
+from .base import Capture, CaptureSet, JobModelBase
+
+logger = logging.getLogger(__name__)
+
+
+class JobModelImage(JobModelBase[SingleImageConfigurationSet]):
+    _media_type = MediaitemTypes.image
+
+    def __init__(self, configuration_set: SingleImageConfigurationSet, acquisition_service: AcquisitionService):
+        super().__init__(configuration_set, acquisition_service=acquisition_service)
+
+        # self._validate_job()
+
+    @property
+    def total_captures_to_take(self) -> int:
+        return 1
+
+    def on_enter_ready(self):
+        self._acquisition_service.thrill_still()
+        self._acquisition_service.signalbackend_configure_optimized_for_hq_preview()
+
+    def on_enter_counting(self):
+        super().on_enter_counting()
+
+    def on_exit_counting(self):
+        super().on_exit_counting()
+
+    def on_enter_capture(self):
+        logger.info(f"current capture ({self.captures_taken + 1}/{self.total_captures_to_take}, remaining {self.remaining_captures_to_take - 1})")
+
+        self._acquisition_service.signalbackend_configure_optimized_for_hq_capture()
+
+        captureset = CaptureSet([Capture(self._acquisition_service.wait_for_still_file())])
+
+        # add to tmp collection
+        # update model so it knows the latest number of captures and the machine can react accordingly if finished
+        self._capture_sets.append(captureset)
+
+        # logger.info(f"captureset {captureset} successful") # not helpful to output normally.
+
+    def on_exit_capture(self): ...
+
+    def on_enter_approval(self):
+        self._approval_id = self._capture_sets[-1].captures[0].uuid
+
+    def on_exit_approval(self, event: Event):
+        super().on_exit_approval(event)
+        self._approval_id = None
+
+    def on_enter_completed(self):
+        super().on_enter_completed()
+
+        ## PHASE 1:
+        # postprocess each capture individually
+        capture_to_process = self._capture_sets[0].captures[0].filepath
+        mediaitem = self.complete_phase1image(capture_to_process, True, self._configuration_set.processing)
+
+        # out to db/ui
+        self.set_results(mediaitem, mediaitem.id)
+
+        logger.info(f"capture {mediaitem.processed} processed")
+
+    def on_exit_completed(self): ...
+
+    def on_enter_finished(self): ...

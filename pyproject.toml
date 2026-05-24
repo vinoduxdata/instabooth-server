@@ -1,0 +1,184 @@
+[project]
+name = "photobooth-app"
+version = "v9.0.0"
+requires-python = ">=3.11"
+description = "Photobooth app written in Python supporting DSLR, picamera2 and webcameras"
+authors = [{ name = "Michael G", email = "me@mgineer85.de" }]
+maintainers = [{ name = "Michael G", email = "me@mgineer85.de" }]
+readme = "README.md"
+license = { text = "MIT" }
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Multimedia :: Graphics",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: Multimedia :: Graphics :: Capture :: Digital Camera",
+]
+keywords = [
+  "photobooth",
+  "photobooth-app",
+  "wedding",
+  "booth",
+  "raspberry-pi",
+  "camera",
+  "python",
+  "filter",
+  "gphoto2",
+  "dslr",
+  "picamera2",
+]
+dependencies = [
+  "fastapi>=0.106.0",
+  "opencv-python-headless~=4.13.0",
+  "numpy>=2.0.0",
+  "pillow>=12.1.1",
+  "psutil>=7.2.0",
+  "pydantic>=2.11.2",
+  "pydantic-extra-types>=2.3.0",
+  "pydantic-settings>=2.11,<2.13",
+  "sse-starlette>=2.2.0,<4.0.0",
+  "uvicorn[standard]>=0.24",                                                        # adds websockets and uvloop
+  "python-dotenv>=1.0.0",
+  "pyserial~=3.5",
+  "jsonref>=1.1.0",
+  "pilgram2>=2.0.6",
+  "linuxpy>=0.10.0; platform_system == 'Linux'",
+  "gpiozero~=2.0.0",
+  "gphoto2>=2.6.1,<2.7; platform_system == 'Linux' or platform_system == 'Darwin'",
+  "python-statemachine>=2.4.0",
+  "python-multipart>=0.0.6",
+  "pyjwt[crypto]>=2.8.0",
+  "piexif>=1.1.3",
+  "SQLAlchemy>=2.0.37",
+  "simplejpeg>=1.8.2",
+  "pyturbojpeg>=1.7.0",
+  "pluggy>=1.5.0",
+  "av>=16.0,<16.2",
+  "alembic>=1.15.2",
+  "onnxruntime",
+  "rclone-bin-api>=1.0.4",
+  "wigglecam",                                                                      # to use the imagemessagedataclass, no dependencies in base module
+  "pynng",                                                                          # needs python3-dev package
+  "requests",
+  "pywin32; platform_system == 'Windows'",
+]
+
+[project.scripts]
+photobooth = "photobooth.__main__:main"
+
+[project.entry-points.photobooth11]
+commander = 'photobooth.plugins.commander.commander'
+gpio_lights = 'photobooth.plugins.gpio_lights.gpio_lights'
+wled = 'photobooth.plugins.wled.wled'
+filter_pilgram2 = 'photobooth.plugins.filter_pilgram2.filter_pilgram2'
+synchronizer_rclone = 'photobooth.plugins.synchronizer_rclone.synchronizer_rclone'
+
+
+[project.urls]
+Homepage = "https://github.com/photobooth-app/photobooth-app"
+Repository = "https://github.com/photobooth-app/photobooth-app"
+Documentation = "https://photobooth-app.org"
+
+
+[tool.pytest.ini_options]
+log_cli = true
+log_cli_level = "DEBUG"
+log_cli_format = "%(asctime)s [%(levelname)8s] %(message)s (%(filename)s:%(lineno)s)"
+log_cli_date_format = "%Y-%m-%d %H:%M:%S"
+
+[tool.coverage.run]
+# disable couldnt-parse: https://github.com/nedbat/coveragepy/issues/1392
+disable_warnings = ["couldnt-parse"]
+omit = ["test_*.py", "./src/tests/*"]
+parallel = true
+concurrency = ["thread", "multiprocessing"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+ignore = ["./experimental/"]
+typeCheckingMode = "standard"
+
+
+[tool.ruff]
+line-length = 150
+
+[tool.ruff.lint]
+select = [
+  "E",  # pycodestyle
+  "W",  # pycodestyle
+  "F",  # pyflakes
+  "B",  # bugbear
+  "UP", # pyupgrade
+  "I",  # isort
+  #"D",   # pydocstyle   # add later
+]
+ignore = [
+  "B008", #used for DI injection
+]
+
+[tool.ruff.lint.per-file-ignores]
+"src/photobooth/services/config/*" = ["E501"]
+"src/photobooth/plugins/*/config.py" = ["E501"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[dependency-groups]
+dev = [
+  "ruff",
+  "pytest",
+  "pytest-cov",
+  "pytest-httpserver",
+  "pytest-asyncio",
+  "pytest-benchmark[histogram]>=5.1.0",
+  "coverage[toml]",
+  "httpx",
+  "httpx-sse",
+  "pydot",
+  "pre-commit",
+  "pyright",
+  "poethepoet",
+  "wigglecam[node]"
+]
+
+
+[tool.uv]
+default-groups = [
+  "dev",
+] # by default only dev is automatically installed, so here add benchmarks
+
+
+# uv does not yet support [tool.pdm.scripts], so we skip this for now... https://github.com/astral-sh/uv/issues/5903
+[tool.poe.tasks]
+lint = [
+  { cmd = "uv run pyright" },
+  { cmd = "uv run ruff check" },
+  { cmd = "uv run ruff format --check" },
+]
+format = [{ cmd = "uv run ruff check --fix" }, { cmd = "uv run ruff format" }]
+test = [
+  { cmd = "pytest --basetemp=./tests_tmp/ -v ./src/tests/tests --cov-report=term --cov-report=xml:coverage.xml --cov --durations=10" },
+]
+benchmark = [
+  { cmd = "pytest --benchmark-only --benchmark-autosave --basetemp=./tests_tmp/ -v ./src/tests/benchmarks" },
+]
+
+
+[build-system]
+requires = ["uv_build>=0.8.3,<0.11.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = ["photobooth", "web"]
+
+# comment out for local development using editable installs
+[tool.uv.sources]
+# # rclone-bin-api = {  workspace = true, editable=true }
+# rclone-bin-api = { path = "../rclone-bin-api", editable=true }
+# wigglecam = { path="../photobooth-wigglecam", editable = true }
