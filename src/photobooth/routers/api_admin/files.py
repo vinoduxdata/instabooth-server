@@ -13,6 +13,7 @@ from fastapi.exceptions import HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 
 from ... import RECYCLE_PATH
+from ...services.scoped_context import ScopeError, resolve_scope, sanitize_under_root
 from ...utils.helper import filenames_sanitize
 
 logger = logging.getLogger(__name__)
@@ -102,11 +103,30 @@ def generate_zipstream(paths: list[Path]):
         logger.error(f"error creating the compressed data: {exc}")
 
 
+def _resolve_scoped_path(dir_or_file: str, event_id: str | None, template_id: str | None) -> tuple[Path, Path | None]:
+    if not event_id and not template_id:
+        path = filenames_sanitize(dir_or_file).relative_to(Path.cwd())
+        return path, None
+    try:
+        scope = resolve_scope(event_id, template_id)
+    except ScopeError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    if dir_or_file in ("", "/"):
+        return scope.root, scope.root
+    return sanitize_under_root(dir_or_file, scope.root), scope.root
+
+
+def _display_path(path: Path, scope_root: Path | None) -> str:
+    if scope_root is None:
+        return path.as_posix()
+    return path.relative_to(scope_root).as_posix()
+
+
 @router.get("/list/{dir:path}", response_model=list[PathListItem])
-async def get_list(dir: str = "/"):
+async def get_list(dir: str = "/", event_id: str | None = None, template_id: str | None = None):
     """ """
     try:
-        path = filenames_sanitize(dir).relative_to(Path.cwd())
+        path, scope_root = _resolve_scoped_path(dir, event_id, template_id)
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"failed to get file: {exc}") from exc
     if not path.is_dir():
@@ -120,14 +140,14 @@ async def get_list(dir: str = "/"):
             folder_size = sum(
                 os.path.getsize(os.path.join(dirpath, filename)) for dirpath, dirnames, filenames in os.walk(f) for filename in filenames
             )
-            output.append(PathListItem(f.name, f.as_posix(), f.is_dir(), folder_size))
+            output.append(PathListItem(f.name, _display_path(f, scope_root), f.is_dir(), folder_size))
         except Exception as exc:
             logger.warning(f"skipped folder {f.name}, due to error: {exc}")
 
     files = [f for f in sorted(path.iterdir()) if f.is_file()]
     for f in files:
         try:
-            output.append(PathListItem(f.name, f.as_posix(), f.is_dir(), f.stat().st_size))
+            output.append(PathListItem(f.name, _display_path(f, scope_root), f.is_dir(), f.stat().st_size))
         except Exception as exc:
             logger.warning(f"skipped file {f.name}, due to error: {exc}")
 
@@ -135,11 +155,11 @@ async def get_list(dir: str = "/"):
 
 
 @router.get("/file/{file:path}")
-async def get_file(file: str = ""):
+async def get_file(file: str = "", event_id: str | None = None, template_id: str | None = None):
     """ """
     try:
         logger.info(file)
-        path = filenames_sanitize(file)
+        path, _ = _resolve_scoped_path(file, event_id, template_id)
         logger.info(path)
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"failed to get file: {exc}") from exc
@@ -150,7 +170,12 @@ async def get_file(file: str = ""):
 
 
 @router.post("/file/upload", status_code=status.HTTP_201_CREATED)
-def create_upload_file(upload_target_folder: Annotated[str, Body()], uploaded_files: list[UploadFile]):
+def create_upload_file(
+    upload_target_folder: Annotated[str, Body()],
+    uploaded_files: list[UploadFile],
+    event_id: str | None = None,
+    template_id: str | None = None,
+):
     logger.info(f"file upload started, upload to folder '{upload_target_folder}'")
 
     # check for files uploaded
@@ -159,7 +184,7 @@ def create_upload_file(upload_target_folder: Annotated[str, Body()], uploaded_fi
 
     # check target directory
     try:
-        upload_target_folder_path = filenames_sanitize(upload_target_folder)
+        upload_target_folder_path, _ = _resolve_scoped_path(upload_target_folder, event_id, template_id)
         if not upload_target_folder_path.is_dir():
             raise ValueError(f"{upload_target_folder_path=} is no directory / does not exist")
 
@@ -183,7 +208,11 @@ def create_upload_file(upload_target_folder: Annotated[str, Body()], uploaded_fi
 
 
 @router.post("/folder/new", status_code=status.HTTP_201_CREATED)
-async def post_folder_new(new_folder_name: Annotated[str, Body()]):
+async def post_folder_new(
+    new_folder_name: Annotated[str, Body()],
+    event_id: str | None = None,
+    template_id: str | None = None,
+):
     """need to provide full path starting from CWD."""
 
     logger.info(f"post_folder_new requested, {new_folder_name=}")
@@ -194,7 +223,7 @@ async def post_folder_new(new_folder_name: Annotated[str, Body()]):
     new_path = None
 
     try:
-        new_path = filenames_sanitize(new_folder_name)
+        new_path, _ = _resolve_scoped_path(new_folder_name, event_id, template_id)
         new_path.mkdir(exist_ok=False, parents=True)
         logger.debug(f"folder {new_path=} created")
     except ValueError as exc:
@@ -207,9 +236,13 @@ async def post_folder_new(new_folder_name: Annotated[str, Body()]):
 
 
 @router.post("/delete", status_code=status.HTTP_204_NO_CONTENT)
-async def post_delete(selected_paths: list[PathListItem]):
+async def post_delete(
+    selected_paths: list[PathListItem],
+    event_id: str | None = None,
+    template_id: str | None = None,
+):
     """ """
-    filenames_to_process = [filenames_sanitize(selected_path.filepath) for selected_path in selected_paths]
+    filenames_to_process = [_resolve_scoped_path(selected_path.filepath, event_id, template_id)[0] for selected_path in selected_paths]
     logger.info(f"request delete, {filenames_to_process=}")
 
     def rmdir(directory: Path):
@@ -241,11 +274,15 @@ async def post_delete(selected_paths: list[PathListItem]):
 
 
 @router.post("/zip")
-def post_zip(selected_paths: list[PathListItem]):
+def post_zip(
+    selected_paths: list[PathListItem],
+    event_id: str | None = None,
+    template_id: str | None = None,
+):
     zip_filename = f"photobooth_archive_{datetime.now().astimezone().strftime('%Y%m%d-%H%M%S')}.zip"
 
     try:
-        filenames_to_process = [filenames_sanitize(selected_path.filepath) for selected_path in selected_paths]
+        filenames_to_process = [_resolve_scoped_path(selected_path.filepath, event_id, template_id)[0] for selected_path in selected_paths]
         # preflight check if selected paths exist, otherwise raise error here because in generator there is no ability to
         # raise exceptions since output started already.
         for path in filenames_to_process:

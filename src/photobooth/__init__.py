@@ -66,8 +66,9 @@ def _copy_demo_assets_to_userdata():
         raise RuntimeError(f"error setup demoassets, {dst_path} exists but is no symlink!")
 
 
-try:
-    _create_basic_folders()
-    _copy_demo_assets_to_userdata()
-except Exception as exc:
-    raise RuntimeError(f"cannot initialize data folders, error: {exc}") from exc
+def initialize_data_environment():
+    try:
+        _create_basic_folders()
+        _copy_demo_assets_to_userdata()
+    except Exception as exc:
+        raise RuntimeError(f"cannot initialize data folders, error: {exc}") from exc

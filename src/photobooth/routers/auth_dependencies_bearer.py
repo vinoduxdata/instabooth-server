@@ -42,15 +42,26 @@ def verify_password(plain_password: str, password: str):
 
 
 def get_users() -> dict[str, UserInDB]:
-    users_db = {
+    from ..services.user_admin import users_for_auth
+
+    auth_users = users_for_auth()
+    if auth_users:
+        return {
+            username: UserInDB(
+                username=user.username,
+                full_name=user.full_name,
+                password=user.password,
+            )
+            for username, user in auth_users.items()
+        }
+
+    return {
         "admin": UserInDB(
             username="admin",
             full_name="Admin",
             password=appconfig.common.admin_password.get_secret_value(),
         )
     }
-
-    return users_db
 
 
 def get_user(db: dict[str, UserInDB], user_id: str) -> UserInDB | None:

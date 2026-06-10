@@ -6,6 +6,16 @@ from fastapi.testclient import TestClient
 from gpiozero import Device
 from gpiozero.pins.mock import MockFactory
 
+import tempfile
+from pathlib import Path
+
+from photobooth import initialize_data_environment
+from photobooth.paths import bootstrap_from_argv
+
+_test_data_dir = Path(tempfile.mkdtemp(prefix="photobooth-test-"))
+bootstrap_from_argv(["--data-dir", str(_test_data_dir)])
+initialize_data_environment()
+
 from photobooth.appconfig import appconfig
 from photobooth.application import app
 from photobooth.container import container

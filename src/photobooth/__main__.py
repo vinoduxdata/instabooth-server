@@ -11,19 +11,29 @@ from pathlib import Path
 
 import uvicorn
 
-from .database.database import create_db_and_tables
+from .paths import bootstrap_from_argv
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--host", action="store", type=str, default="0.0.0.0", help="Host the server is bound to (default: %(default)s).")
 parser.add_argument("--port", action="store", type=int, default=8000, help="Port the server listens to (default: %(default)s).")
+parser.add_argument("--data-dir", type=str, default=None, help="Event data directory (overrides active-event.json).")
+parser.add_argument("--admin-dir", type=str, default=None, help="instabooth-admin directory for event registry and templates.")
 
 logger = logging.getLogger(f"{__name__}")
 
 
 def main(args=None, run_server: bool = True):
-    args = parser.parse_args(args)  # parse here, not above because pytest system exit 2
+    remaining_args = bootstrap_from_argv(args)
+
+    from . import initialize_data_environment
+
+    initialize_data_environment()
+
+    args = parser.parse_args(remaining_args)  # parse here, not above because pytest system exit 2
 
     print("Booting app, this can take some time depending on installed extras...")
+
+    from .database.database import create_db_and_tables
 
     # create all db before anything else...
     create_db_and_tables()
@@ -36,8 +46,12 @@ def main(args=None, run_server: bool = True):
 
     logger.info("✨ Welcome to the photobooth-app ✨")
 
+    from .paths import ADMIN_DIR, DATA_DIR
+
     logger.info(f"photobooth directory: {Path(__file__).parent.resolve()}")
     logger.info(f"working directory: {Path.cwd().resolve()}")
+    logger.info(f"data directory: {DATA_DIR}")
+    logger.info(f"admin directory: {ADMIN_DIR}")
     logger.info(f"app version started: {version('photobooth-app')}")
 
     server = uvicorn.Server(uvicorn.Config(app=app, host=host, port=port, log_level="info", workers=None))
