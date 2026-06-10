@@ -2,7 +2,7 @@ import logging
 import os
 import sys
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from ...services import event_admin
@@ -106,27 +106,28 @@ def api_update_event_status(event_id: str, body: UpdateEventStatusRequest):
         raise HTTPException(400, str(exc)) from exc
 
 
+def _restart_photobooth(data_path: str) -> None:
+    from ...paths import ADMIN_DIR
+
+    logger.info("restarting photobooth with data-dir %s", data_path)
+    argv = [sys.executable, "-m", "photobooth", "--data-dir", data_path]
+    env = os.environ.copy()
+    if ADMIN_DIR is not None:
+        argv.extend(["--admin-dir", str(ADMIN_DIR)])
+        server_src = ADMIN_DIR.parent / "instabooth-server" / "src"
+        if server_src.is_dir():
+            env["PYTHONPATH"] = str(server_src) + (f":{env['PYTHONPATH']}" if env.get("PYTHONPATH") else "")
+    os.execve(sys.executable, argv, env)
+
+
 @router.post("/{event_id}/activate")
-def api_activate_event(event_id: str, restart: bool = False):
+def api_activate_event(event_id: str, background_tasks: BackgroundTasks, restart: bool = False):
     try:
         result = event_admin.activate_event(event_id)
     except EventAdminError as exc:
         raise HTTPException(400, str(exc)) from exc
 
     if restart and result.get("restart_required"):
-        from ...paths import ADMIN_DIR
-
-        data_path = result["data_path"]
-        logger.info("restarting photobooth with data-dir %s", data_path)
-        from pathlib import Path
-
-        argv = [sys.executable, "-m", "photobooth", "--data-dir", data_path]
-        env = os.environ.copy()
-        if ADMIN_DIR is not None:
-            argv.extend(["--admin-dir", str(ADMIN_DIR)])
-            server_src = ADMIN_DIR.parent / "instabooth-server" / "src"
-            if server_src.is_dir():
-                env["PYTHONPATH"] = str(server_src) + (f":{env['PYTHONPATH']}" if env.get("PYTHONPATH") else "")
-        os.execve(sys.executable, argv, env)
+        background_tasks.add_task(_restart_photobooth, result["data_path"])
 
     return result

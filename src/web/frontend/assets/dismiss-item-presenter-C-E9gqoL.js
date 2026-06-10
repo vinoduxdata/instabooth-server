@@ -1,0 +1,1 @@
+import{g as a,r}from"./index-GiVAvO4R.js";async function o(e){const t=a(),s=t.jobmodel.present_mediaitem_id;s&&(t.presenterDismissedFor=s);try{await r("/api/processing/next")}catch{}e.currentRoute.value.path!=="/"&&await e.replace("/")}export{o as d};

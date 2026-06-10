@@ -5,6 +5,7 @@ Photobooth Application start script
 
 import argparse
 import logging
+import os
 import sys
 from importlib.metadata import version
 from pathlib import Path
@@ -29,6 +30,18 @@ def main(args=None, run_server: bool = True):
 
     initialize_data_environment()
 
+    from .services.booth_config import apply_booth_config_on_startup
+
+    synced_config = apply_booth_config_on_startup()
+    if synced_config is not None:
+        logger.info(f"synced booth config into active event: {synced_config}")
+
+    from .services.hotspot import ensure_auto_wifi_qr_on_startup
+
+    wifi_qr = ensure_auto_wifi_qr_on_startup()
+    if wifi_qr is not None:
+        logger.info(f"hotspot Wi-Fi QR: {wifi_qr}")
+
     args = parser.parse_args(remaining_args)  # parse here, not above because pytest system exit 2
 
     print("Booting app, this can take some time depending on installed extras...")
@@ -52,6 +65,13 @@ def main(args=None, run_server: bool = True):
     logger.info(f"working directory: {Path.cwd().resolve()}")
     logger.info(f"data directory: {DATA_DIR}")
     logger.info(f"admin directory: {ADMIN_DIR}")
+    from .services.event_admin import booth_config_file
+
+    try:
+        logger.info(f"booth mode: {os.environ.get('INSTABOOTH_MODE', 'prod')}")
+        logger.info(f"booth config: {booth_config_file()}")
+    except Exception:
+        pass
     logger.info(f"app version started: {version('photobooth-app')}")
 
     server = uvicorn.Server(uvicorn.Config(app=app, host=host, port=port, log_level="info", workers=None))

@@ -81,8 +81,22 @@ def _save_events_registry(registry: dict[str, Any]) -> None:
     _write_json_atomic(_events_file(), registry)
 
 
+def booth_config_file() -> Path:
+    _require_admin()
+    override = os.environ.get("INSTABOOTH_BOOTH_CONFIG")
+    if override:
+        return Path(override).expanduser().resolve()
+    mode = os.environ.get("INSTABOOTH_MODE", "prod").lower()
+    if mode not in ("demo", "prod"):
+        raise EventAdminError(f"invalid INSTABOOTH_MODE: {mode!r} (use demo or prod)")
+    mode_file = admin_path(f"booth.{mode}.json")
+    if mode_file.is_file():
+        return mode_file
+    return admin_path("booth.json")
+
+
 def _load_booth_config() -> dict[str, Any]:
-    booth_file = admin_path("booth.json")
+    booth_file = booth_config_file()
     if not booth_file.is_file():
         return {}
     return _read_json(booth_file)
@@ -470,7 +484,8 @@ def delete_template(template_id: str) -> None:
     template_dir = admin_path("templates", template_id)
     if not template_dir.is_dir():
         raise EventAdminError(f"template not found: {template_id}")
-    for event in list_events(include_deleted=True):
-        if event.get("template_id") == template_id:
-            raise EventAdminError(f"template is used by event {event['id']}")
+    using_events = [event["id"] for event in list_events() if event.get("template_id") == template_id]
+    if using_events:
+        names = ", ".join(using_events)
+        raise EventAdminError(f"template is used by events: {names}. Delete those events first.")
     shutil.rmtree(template_dir)

@@ -41,6 +41,30 @@ def admin_env(tmp_path: Path):
     yield admin_dir, data_root
 
 
+def test_booth_config_file_mode_specific(admin_env):
+    admin_dir, _ = admin_env
+    (admin_dir / "booth.demo.json").write_text(
+        json.dumps({"backends": {"group_backends": [{"backend_config": {"backend_type": "VirtualCamera"}}]}}),
+        encoding="utf-8",
+    )
+    (admin_dir / "booth.prod.json").write_text(
+        json.dumps({"backends": {"group_backends": [{"backend_config": {"backend_type": "Gphoto2"}}]}}),
+        encoding="utf-8",
+    )
+
+    monkeypatch = pytest.MonkeyPatch()
+    try:
+        monkeypatch.setenv("INSTABOOTH_MODE", "demo")
+        assert event_admin.booth_config_file().name == "booth.demo.json"
+        assert event_admin._load_booth_config()["backends"]["group_backends"][0]["backend_config"]["backend_type"] == "VirtualCamera"
+
+        monkeypatch.setenv("INSTABOOTH_MODE", "prod")
+        assert event_admin.booth_config_file().name == "booth.prod.json"
+        assert event_admin._load_booth_config()["backends"]["group_backends"][0]["backend_config"]["backend_type"] == "Gphoto2"
+    finally:
+        monkeypatch.undo()
+
+
 def test_merge_event_config():
     merged = merge_event_config(
         {"actions": {"image": []}, "uisettings": {"PRIMARY_COLOR": "#111111"}},

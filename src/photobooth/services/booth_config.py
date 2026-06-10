@@ -15,8 +15,9 @@ from .config.baseconfig import SchemaTypes
 from .config.groups.cameras import GroupCameras
 from .config.groups.common import GroupCommon
 from .config.groups.hardwareinputoutput import GroupHardwareInputOutput
+from .config.groups.hotspot import GroupHotspot
 from .config.groups.misc import GroupMisc
-from .event_admin import BOOTH_CONFIG_GROUPS, EventAdminError, _load_booth_config, _require_admin
+from .event_admin import BOOTH_CONFIG_GROUPS, EventAdminError, _load_booth_config, _require_admin, booth_config_file
 from .event_admin import _write_json_atomic as write_json_atomic
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ class BoothConfig(BaseModel):
     backends: GroupCameras = GroupCameras()
     hardwareinputoutput: GroupHardwareInputOutput = GroupHardwareInputOutput()
     misc: GroupMisc = GroupMisc()
+    hotspot: GroupHotspot = GroupHotspot()
 
     @classmethod
     def _fix_single_allof(cls, dictionary: dict[str, Any]) -> dict[str, Any]:
@@ -67,10 +69,19 @@ class BoothConfig(BaseModel):
 
 
 def _booth_file() -> Path:
-    _require_admin()
-    from ..paths import admin_path
+    return booth_config_file()
 
-    return admin_path("booth.json")
+
+def apply_booth_config_on_startup() -> Path | None:
+    """Merge booth-global groups into the active event config before services start."""
+    try:
+        _require_admin()
+    except EventAdminError:
+        return None
+    data = _load_booth_config()
+    if not data:
+        return None
+    return sync_booth_groups_to_active_event(data)
 
 
 def get_booth_config(*, secrets_is_allowed: bool = False) -> dict[str, Any]:

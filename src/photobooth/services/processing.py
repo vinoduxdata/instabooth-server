@@ -195,7 +195,7 @@ class ProcessingService(BaseService):
 
         finally:
             self._workflow_jobmodel = None
-            # send empty response to ui so it knows it's in idle again.
+            sse_service.dispatch_event(SseEventProcessStateinfo(None, None, None))
 
     def initial_emit(self):
         # on init if never a job ran, model could not be avail.
